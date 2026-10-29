@@ -6,6 +6,8 @@
  */
 
 const APP_VERSION = '1.0.0';
+/** Used for "today", month boundaries and date formatting. */
+const TIME_ZONE = 'Asia/Dubai';
 const DEFAULT_CURRENCY = 'AED';
 const SESSION_TTL_DAYS = 14;
 const STALE_PRICE_DAYS = 7;

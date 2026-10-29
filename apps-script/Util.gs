@@ -32,8 +32,9 @@ function nowIso_() {
   return new Date().toISOString();
 }
 
+/** Fixed in Config.gs so the project's own time-zone setting doesn't matter. */
 function scriptTimeZone_() {
-  return Session.getScriptTimeZone() || 'Asia/Dubai';
+  return TIME_ZONE;
 }
 
 function todayStr_() {

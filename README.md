@@ -55,7 +55,7 @@ You'll need: your Google account (the administrator), this GitHub repository, an
 
 ### Step 1 — Google Sheet + Apps Script
 
-Follow [`apps-script/README.md` § 1](apps-script/README.md#1-create-the-spreadsheet-and-the-script): create the spreadsheet, create the script project, paste the files (or `clasp push`), set the `SPREADSHEET_ID` and `USERS` script properties, run `setup()`.
+Follow [`apps-script/README.md` § 1](apps-script/README.md#1-create-the-spreadsheet-and-the-script): create the spreadsheet, create the script project, paste the single file [`paste-into-apps-script/Code.gs`](paste-into-apps-script/Code.gs) into the editor's `Code.gs`, set the `SPREADSHEET_ID` and `USERS` script properties, run `setup()`.
 
 Example `USERS` value: `rony:Choose-A-Strong-Pass, wife:Her-Own-Pass-123` (you are the admin because you're listed first).
 
@@ -88,7 +88,7 @@ If you get "unexpected response", the deployment's access isn't set to *Anyone*.
 ### Updating
 
 - **Frontend**: push to `main`; GitHub Actions redeploys automatically.
-- **Backend**: update the `.gs` files (`npm run clasp:push`), then *Deploy → Manage deployments → Edit → New version*. Keep the same deployment so the URL doesn't change.
+- **Backend**: edit `apps-script/*.gs`, run `npm run bundle`, paste the new `paste-into-apps-script/Code.gs` into the editor (or `npm run clasp:push`), then *Deploy → Manage deployments → Edit → New version*. Keep the same deployment so the URL doesn't change.
 
 ---
 
@@ -135,7 +135,8 @@ npm run test:e2e
 ## Project structure
 
 ```
-apps-script/           Apps Script backend (.gs files, manifest, backend README)
+apps-script/           Apps Script backend source (.gs files, manifest, backend README)
+paste-into-apps-script/ The whole backend as ONE file to paste into the Apps Script editor (npm run bundle)
 src/
   components/ui/       Buttons, cards, forms, modals, states
   components/charts/   Recharts wrappers (validated colour palette, tooltips, legends)

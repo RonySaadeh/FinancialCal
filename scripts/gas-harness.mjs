@@ -113,6 +113,7 @@ function formatDate(date, tz, fmt) {
  * Creates an isolated Apps Script environment.
  * @param {object} opts
  * @param {Record<string,string>} [opts.properties]  Initial script properties.
+ * @param {string[]} [opts.files]  Source files to load instead of apps-script/*.gs.
  * @param {() => string} [opts.today]  Overrides "today" (yyyy-MM-dd) for deterministic tests.
  */
 export function createGasEnvironment(opts = {}) {
@@ -186,9 +187,10 @@ export function createGasEnvironment(opts = {}) {
     }
   };
   const context = vm.createContext(sandbox);
-  const files = readdirSync(ROOT).filter((f) => f.endsWith('.gs')).sort();
+  // By default load apps-script/*.gs; opts.files can point at other sources (e.g. the single-file bundle).
+  const files = opts.files || readdirSync(ROOT).filter((f) => f.endsWith('.gs')).sort().map((f) => join(ROOT, f));
   for (const f of files) {
-    vm.runInContext(readFileSync(join(ROOT, f), 'utf8'), context, { filename: f });
+    vm.runInContext(readFileSync(f, 'utf8'), context, { filename: f });
   }
   if (opts.today) {
     const todayFn = opts.today;

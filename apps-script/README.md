@@ -19,9 +19,8 @@ This folder is the whole backend: a Google Apps Script **Web App** that stores d
 1. In Google Drive create a blank spreadsheet called `Financial Cal Database` and copy its ID from the URL: `https://docs.google.com/spreadsheets/d/<THIS_PART>/edit`.
    (Alternatively skip this: `setup()` creates a spreadsheet for you and saves its ID.)
 2. Open <https://script.google.com/> → **New project**, name it `Financial Cal API`.
-3. Copy the code in, either:
-   - **By hand**: in the editor enable *Project Settings → Show "appsscript.json" manifest file*, then create one script file per `.gs` file here (same names, without `.gs`) and paste the contents, and paste `appsscript.json` over the manifest; or
-   - **With clasp** (see below).
+3. Copy the code in. **Easiest:** open [`paste-into-apps-script/Code.gs`](../paste-into-apps-script/Code.gs) on GitHub, click **Raw**, select all and copy; in the Apps Script editor click `Code.gs`, delete everything, paste, and save. That single file contains the whole backend (it is generated from this folder by `npm run bundle`). Nothing else needs to be added — not even `appsscript.json`.
+   Developers can instead push this folder with **clasp** (see below).
 4. **Project Settings → Script properties → Add script property**:
 
    | Property | Value |

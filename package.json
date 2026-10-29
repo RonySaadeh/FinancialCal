@@ -17,7 +17,8 @@
     "dev:local": "VITE_API_URL=http://localhost:8787 vite",
     "test:e2e": "node tests/e2e/smoke.mjs",
     "clasp:push": "cd apps-script && clasp push",
-    "clasp:deploy": "cd apps-script && clasp push && clasp deploy --description \"Financial Cal\""
+    "clasp:deploy": "cd apps-script && clasp push && clasp deploy --description \"Financial Cal\"",
+    "bundle": "node scripts/bundle-apps-script.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.105.0",
