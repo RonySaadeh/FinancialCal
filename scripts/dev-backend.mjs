@@ -4,11 +4,10 @@
  * over HTTP using in-memory fakes of Google services (see gas-harness.mjs).
  *
  *   npm run dev:backend            # http://localhost:8787
- *   VITE_API_URL=http://localhost:8787 VITE_DEV_AUTH=true npm run dev
+ *   npm run dev:local              # frontend pointed at it
  *
- * Sign-in: instead of Google, it accepts the development token "dev|<email>"
- * produced by the dev sign-in form. This token format is only understood
- * here; the deployed Apps Script verifies every token with Google.
+ * Users: rony / rony-password (admin) and wife / wife-password, created via
+ * the same USERS setting the real setup() uses. Override with DEV_USERS.
  *
  * Data is kept in .dev-data/db.json so it survives restarts. Never point this
  * at real financial data — it is for development and testing only.
@@ -23,23 +22,11 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = join(ROOT, '.dev-data');
 const DATA_FILE = join(DATA_DIR, 'db.json');
 const PORT = Number(process.env.PORT || 8787);
-const CLIENT_ID = 'dev-client-id';
 
 const env = createGasEnvironment({
   quiet: false,
   properties: {
-    GOOGLE_CLIENT_ID: CLIENT_ID,
-    ADMIN_EMAILS: process.env.DEV_ADMIN_EMAILS || 'rony@example.com',
-    INVITE_EMAILS: process.env.DEV_INVITE_EMAILS || 'wife@example.com'
-  },
-  tokenInfo(idToken) {
-    const m = /^dev\|([^\s@|]+@[^\s@|]+\.[^\s@|]+)$/.exec(idToken);
-    if (!m) return null;
-    const email = m[1].toLowerCase();
-    return {
-      aud: CLIENT_ID, iss: 'https://accounts.google.com', exp: String(Math.floor(Date.now() / 1000) + 3600),
-      email_verified: 'true', sub: 'dev-' + email, email, name: email.split('@')[0].replace(/[._-]/g, ' ')
-    };
+    USERS: process.env.DEV_USERS || 'rony:rony-password, wife:wife-password'
   }
 });
 
@@ -86,5 +73,5 @@ const server = createServer((req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Financial Cal dev backend on http://localhost:${PORT}`);
-  console.log('Invited users: ' + env.properties.get('ADMIN_EMAILS') + ' (admin), ' + env.properties.get('INVITE_EMAILS'));
+  console.log('Sign in as rony / rony-password (admin) or wife / wife-password');
 });

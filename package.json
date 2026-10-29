@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dev:local": "VITE_API_URL=http://localhost:8787 VITE_DEV_AUTH=true vite",
+    "dev:local": "VITE_API_URL=http://localhost:8787 vite",
     "test:e2e": "node tests/e2e/smoke.mjs",
     "clasp:push": "cd apps-script && clasp push",
     "clasp:deploy": "cd apps-script && clasp push && clasp deploy --description \"Financial Cal\""

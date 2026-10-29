@@ -3,7 +3,7 @@ import { newEnv, signIn } from './helpers.js';
 
 function setup() {
   const env = newEnv();
-  const u = signIn(env, 'sub-rony', 'rony@example.com');
+  const u = signIn(env, 'rony');
   return { env, u };
 }
 

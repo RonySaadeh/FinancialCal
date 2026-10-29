@@ -1,24 +1,35 @@
-import { useState, type FormEvent } from 'react';
-import { BarChart3, Lock, ShieldCheck, Users } from 'lucide-react';
-import { config, isConfigured } from '../config';
-import { errorMessage } from '../lib/api';
+import { useEffect, useState, type FormEvent } from 'react';
+import { BarChart3, Eye, EyeOff, Lock, ShieldCheck, Users } from 'lucide-react';
+import { isConfigured } from '../config';
+import { errorMessage, health } from '../lib/api';
 import { useAuth } from '../features/auth/AuthProvider';
-import { GoogleSignInButton } from '../features/auth/GoogleSignInButton';
 import { Alert, Button, TextField } from '../components/ui';
 
 export function LoginPage() {
-  const { signIn, notice } = useAuth();
+  const { signIn, signUp, notice } = useAuth();
+  const [mode, setMode] = useState<'signin' | 'register'>('signin');
+  const [registrationOpen, setRegistrationOpen] = useState(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [show, setShow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const handle = async (idToken: string) => {
+  useEffect(() => {
+    if (!isConfigured) return;
+    health().then((h) => setRegistrationOpen(h.registrationEnabled)).catch(() => setRegistrationOpen(false));
+  }, []);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await signIn(idToken);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
+      if (mode === 'signin') await signIn(username, password);
+      else await signUp(username, password, displayName);
+    } catch (err) {
+      setError(errorMessage(err));
       setBusy(false);
     }
   };
@@ -38,9 +49,9 @@ export function LoginPage() {
           <h1 className="text-4xl font-semibold leading-tight tracking-tight">Your family’s money, clearly organised.</h1>
           <p className="text-base text-indigo-100/80">Track spending, budgets, savings goals, debts and investments — stored in your own Google Sheet.</p>
           <ul className="space-y-3 text-sm text-indigo-100/90">
-            <li className="flex items-center gap-3"><ShieldCheck className="size-5 text-indigo-300" aria-hidden /> Google sign-in, verified on the server</li>
+            <li className="flex items-center gap-3"><ShieldCheck className="size-5 text-indigo-300" aria-hidden /> Passwords checked on the server, stored only as hashes</li>
             <li className="flex items-center gap-3"><Users className="size-5 text-indigo-300" aria-hidden /> Separate, private records for each person</li>
-            <li className="flex items-center gap-3"><Lock className="size-5 text-indigo-300" aria-hidden /> No passwords stored anywhere</li>
+            <li className="flex items-center gap-3"><Lock className="size-5 text-indigo-300" aria-hidden /> Accounts lock after repeated wrong passwords</li>
           </ul>
         </div>
         <p className="relative text-xs text-indigo-200/60">Data lives in a Google Sheet owned by your family administrator.</p>
@@ -52,48 +63,53 @@ export function LoginPage() {
             <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-brand-soft text-brand lg:hidden">
               <BarChart3 className="size-6" aria-hidden />
             </div>
-            <h2 className="text-2xl font-semibold tracking-tight">Welcome back</h2>
-            <p className="text-sm text-ink-3">Sign in with the Google account your administrator invited.</p>
+            <h2 className="text-2xl font-semibold tracking-tight">{mode === 'signin' ? 'Welcome back' : 'Create your account'}</h2>
+            <p className="text-sm text-ink-3">{mode === 'signin' ? 'Sign in with your username and password.' : 'Choose a username and a password of at least 8 characters.'}</p>
           </div>
 
           {!isConfigured ? (
             <Alert tone="error">
-              This copy of Financial Cal is not configured yet. Set <code>VITE_API_URL</code> and <code>VITE_GOOGLE_CLIENT_ID</code> (see README) and rebuild.
+              This copy of Financial Cal is not configured yet. Set <code>VITE_API_URL</code> (see README) and rebuild.
             </Alert>
           ) : (
-            <div className="space-y-4">
-              {import.meta.env.DEV && config.devAuth ? <DevSignIn onToken={handle} busy={busy} /> : <GoogleSignInButton onCredential={handle} />}
-              {busy && <p className="text-center text-sm text-ink-3" role="status">Verifying your account…</p>}
-            </div>
+            <form onSubmit={submit} className="space-y-4">
+              <TextField label="Username" autoComplete="username" autoCapitalize="none" spellCheck={false} required value={username} onChange={(e) => setUsername(e.target.value)} />
+              {mode === 'register' && (
+                <TextField label="Your name" autoComplete="name" maxLength={80} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+              )}
+              <div className="relative">
+                <TextField
+                  label="Password"
+                  type={show ? 'text' : 'password'}
+                  autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+                  minLength={mode === 'register' ? 8 : undefined}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="[&_input]:pr-10"
+                />
+                <button type="button" onClick={() => setShow((v) => !v)} className="absolute bottom-2.5 right-3 text-ink-3 hover:text-ink" aria-label={show ? 'Hide password' : 'Show password'}>
+                  {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
+              <Button type="submit" className="w-full" loading={busy}>{mode === 'signin' ? 'Sign in' : 'Create account'}</Button>
+            </form>
           )}
           {notice && !error && <Alert tone="info">{notice}</Alert>}
           {error && <Alert tone="error">{error}</Alert>}
-          <p className="text-center text-xs text-ink-3">
-            Passwords are handled by Google. Forgot yours?{' '}
-            <a className="font-medium text-brand" href="https://accounts.google.com/signin/recovery" target="_blank" rel="noreferrer">Recover your Google account</a>.
-          </p>
+          <div className="space-y-2 text-center text-xs text-ink-3">
+            {registrationOpen && (
+              <p>
+                {mode === 'signin' ? 'New here? ' : 'Already have an account? '}
+                <button type="button" className="font-medium text-brand" onClick={() => { setMode(mode === 'signin' ? 'register' : 'signin'); setError(null); }}>
+                  {mode === 'signin' ? 'Create an account' : 'Sign in'}
+                </button>
+              </p>
+            )}
+            <p>Forgot your password? Ask the family administrator to reset it.</p>
+          </div>
         </div>
       </section>
     </div>
-  );
-}
-
-/**
- * Local development only (VITE_DEV_AUTH=true with `npm run dev`). The token
- * it produces is only accepted by scripts/dev-backend.mjs; the real Apps
- * Script backend verifies every token with Google and rejects these.
- */
-function DevSignIn({ onToken, busy }: { onToken: (t: string) => void; busy: boolean }) {
-  const [email, setEmail] = useState('rony@example.com');
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    onToken(`dev|${email.trim().toLowerCase()}`);
-  };
-  return (
-    <form onSubmit={submit} className="space-y-3 rounded-2xl border border-dashed border-warning/50 p-4">
-      <p className="text-xs font-medium text-warning">Development sign-in (local dev backend only)</p>
-      <TextField label="Email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
-      <Button type="submit" className="w-full" loading={busy}>Sign in</Button>
-    </form>
   );
 }

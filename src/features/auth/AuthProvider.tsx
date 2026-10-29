@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { api, ApiError, login as apiLogin, onAuthExpired, sessionStore, setSessionToken } from '../../lib/api';
+import { api, ApiError, login as apiLogin, register as apiRegister, onAuthExpired, sessionStore, setSessionToken } from '../../lib/api';
 import type { User } from '../../lib/types';
 
 type Status = 'checking' | 'signedOut' | 'signedIn';
@@ -9,7 +9,8 @@ interface AuthState {
   status: Status;
   user: User | null;
   notice: string | null;
-  signIn: (googleIdToken: string) => Promise<void>;
+  signIn: (username: string, password: string) => Promise<void>;
+  signUp: (username: string, password: string, displayName: string) => Promise<void>;
   signOut: (everywhere?: boolean) => Promise<void>;
   setUser: (u: User) => void;
 }
@@ -18,7 +19,7 @@ const AuthContext = createContext<AuthState | null>(null);
 
 /**
  * Holds the signed-in state. Identity is always established by the backend:
- * the browser only ever holds the opaque session token it was given.
+ * the browser never stores the password, only the opaque session token it was given.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
@@ -53,15 +54,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => onAuthExpired(() => reset('Your session has ended. Please sign in again.')), [reset]);
 
-  const signIn = useCallback(async (googleIdToken: string) => {
-    setNotice(null);
-    const res = await apiLogin(googleIdToken);
+  const begin = useCallback((res: { token: string; expiresAt: string; user: User }) => {
     sessionStore.set({ token: res.token, expiresAt: res.expiresAt });
     setSessionToken(res.token);
     qc.clear();
     setUser(res.user);
     setStatus('signedIn');
   }, [qc]);
+
+  const signIn = useCallback(async (username: string, password: string) => {
+    setNotice(null);
+    begin(await apiLogin(username.trim(), password));
+  }, [begin]);
+
+  const signUp = useCallback(async (username: string, password: string, displayName: string) => {
+    setNotice(null);
+    begin(await apiRegister(username.trim(), password, displayName.trim()));
+  }, [begin]);
 
   const signOut = useCallback(async (everywhere = false) => {
     try {
@@ -72,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     reset(everywhere ? 'You have been signed out on all devices.' : null);
   }, [reset]);
 
-  const value = useMemo(() => ({ status, user, notice, signIn, signOut, setUser }), [status, user, notice, signIn, signOut]);
+  const value = useMemo(() => ({ status, user, notice, signIn, signUp, signOut, setUser }), [status, user, notice, signIn, signUp, signOut]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

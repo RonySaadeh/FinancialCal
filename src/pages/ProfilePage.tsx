@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { ExternalLink, KeyRound, LogOut, Monitor, Moon, Sun, Trash } from 'lucide-react';
+import { KeyRound, LogOut, Monitor, Moon, Sun, Trash } from 'lucide-react';
 import { useAction, useProfile } from '../lib/queries';
 import { COMMON_CURRENCIES, formatDateTime } from '../lib/format';
 import type { Theme, User } from '../lib/types';
@@ -29,20 +29,22 @@ function ProfileForm({ user }: { user: User }) {
   const { setUser } = useAuth();
   const update = useAction<Record<string, unknown>, User>('updateProfile');
   const [displayName, setName] = useState(user.displayName);
+  const [email, setEmail] = useState(user.email);
   const [currency, setCurrency] = useState(user.preferredCurrency);
   const [saved, setSaved] = useState(false);
   const currencyChanged = currency !== user.preferredCurrency;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setSaved(false);
-    update.mutate({ displayName, preferredCurrency: currency }, { onSuccess: (u) => { setUser(u); setSaved(true); } });
+    update.mutate({ displayName, email, preferredCurrency: currency }, { onSuccess: (u) => { setUser(u); setSaved(true); } });
   };
   return (
     <Card>
       <CardHeader title="Personal details" />
       <form onSubmit={submit} className="space-y-4 p-5">
         <TextField label="Display name" required maxLength={80} value={displayName} onChange={(e) => setName(e.target.value)} />
-        <TextField label="Email (Google account)" value={user.email} disabled readOnly />
+        <TextField label="Username" value={user.username} disabled readOnly hint="Used to sign in. Ask the administrator if it needs to change." />
+        <TextField label="Email (optional)" type="email" maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} />
         <SelectField label="Preferred currency" value={currency} onChange={(e) => setCurrency(e.target.value)} hint="Dashboards, budgets and reports are shown in this currency.">
           {[...new Set([currency, ...COMMON_CURRENCIES])].map((c) => <option key={c} value={c}>{c}</option>)}
         </SelectField>
@@ -66,25 +68,7 @@ function Security({ sessions }: { sessions: { id: string; createdAt: string; exp
     <Card>
       <CardHeader title="Sign-in & security" />
       <div className="space-y-5 p-5 text-sm">
-        <div className="flex gap-3">
-          <KeyRound className="mt-0.5 size-5 shrink-0 text-brand" aria-hidden />
-          <div className="space-y-2">
-            <p className="text-ink-2">
-              You sign in with Google. Financial Cal never sees or stores a password; your identity is verified by Google and checked on the server for every request.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <a className="inline-flex items-center gap-1 rounded-lg border border-line px-3 py-1.5 text-xs font-medium hover:bg-surface-2" href="https://myaccount.google.com/signinoptions/password" target="_blank" rel="noreferrer">
-                Change Google password <ExternalLink className="size-3" aria-hidden />
-              </a>
-              <a className="inline-flex items-center gap-1 rounded-lg border border-line px-3 py-1.5 text-xs font-medium hover:bg-surface-2" href="https://accounts.google.com/signin/recovery" target="_blank" rel="noreferrer">
-                Reset / recover account <ExternalLink className="size-3" aria-hidden />
-              </a>
-              <a className="inline-flex items-center gap-1 rounded-lg border border-line px-3 py-1.5 text-xs font-medium hover:bg-surface-2" href="https://myaccount.google.com/security" target="_blank" rel="noreferrer">
-                Google security checkup <ExternalLink className="size-3" aria-hidden />
-              </a>
-            </div>
-          </div>
-        </div>
+        <ChangePassword />
         <div>
           <p className="mb-2 text-xs font-semibold text-ink-2">Active sessions ({sessions.length})</p>
           <ul className="divide-y divide-line rounded-xl border border-line">
@@ -102,6 +86,38 @@ function Security({ sessions }: { sessions: { id: string; createdAt: string; exp
         </Button>
       </div>
     </Card>
+  );
+}
+
+function ChangePassword() {
+  const change = useAction<Record<string, unknown>, { changed: boolean; otherSessionsSignedOut: number }>('changePassword');
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [mismatch, setMismatch] = useState(false);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (next !== confirm) {
+      setMismatch(true);
+      return;
+    }
+    setMismatch(false);
+    change.mutate({ currentPassword: current, newPassword: next }, {
+      onSuccess: () => { setCurrent(''); setNext(''); setConfirm(''); }
+    });
+  };
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      <p className="flex items-center gap-2 text-xs font-semibold text-ink-2"><KeyRound className="size-4 text-brand" aria-hidden /> Change password</p>
+      <TextField label="Current password" type="password" autoComplete="current-password" required value={current} onChange={(e) => setCurrent(e.target.value)} />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <TextField label="New password" type="password" autoComplete="new-password" minLength={8} required value={next} onChange={(e) => setNext(e.target.value)} hint="At least 8 characters" />
+        <TextField label="Repeat new password" type="password" autoComplete="new-password" minLength={8} required value={confirm} onChange={(e) => setConfirm(e.target.value)} error={mismatch ? 'Passwords do not match' : undefined} />
+      </div>
+      <FormError error={change.error} />
+      {change.isSuccess && <Alert tone="success">Password changed.{change.data.otherSessionsSignedOut ? ` Signed out ${change.data.otherSessionsSignedOut} other device(s).` : ''}</Alert>}
+      <Button type="submit" loading={change.isPending}>Change password</Button>
+    </form>
   );
 }
 

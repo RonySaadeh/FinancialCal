@@ -12,9 +12,15 @@ const STALE_PRICE_DAYS = 7;
 const LOCK_TIMEOUT_MS = 15000;
 const MAX_REQUEST_BYTES = 100000;
 
+/** Password hashing and brute-force protection. */
+const PASSWORD_ITERATIONS = 5000;
+const MIN_PASSWORD_LENGTH = 8;
+const MAX_FAILED_LOGINS = 5;
+const LOCKOUT_MINUTES = 15;
+
 /** Sheet name -> ordered column headers. */
 const SCHEMA = {
-  Users: ['id', 'googleSub', 'email', 'displayName', 'status', 'role', 'preferredCurrency', 'theme', 'createdAt', 'updatedAt', 'lastLoginAt'],
+  Users: ['id', 'username', 'email', 'displayName', 'status', 'role', 'preferredCurrency', 'theme', 'passwordHash', 'passwordSalt', 'passwordIterations', 'failedLogins', 'lockedUntil', 'createdAt', 'updatedAt', 'lastLoginAt'],
   Sessions: ['id', 'tokenHash', 'userId', 'createdAt', 'expiresAt', 'userAgent'],
   Accounts: ['id', 'userId', 'name', 'type', 'currency', 'openingBalance', 'openingDate', 'institution', 'archived', 'createdAt', 'updatedAt'],
   Transactions: ['id', 'userId', 'type', 'amount', 'currency', 'categoryId', 'accountId', 'toAccountId', 'toAmount', 'date', 'description', 'notes', 'recurrence', 'recurringId', 'linkType', 'linkId', 'createdAt', 'updatedAt'],
@@ -35,7 +41,8 @@ const NUMBER_COLUMNS = {
   openingBalance: true, amount: true, toAmount: true, sortOrder: true,
   targetAmount: true, initialAmount: true, originalPrincipal: true, interestRate: true,
   minimumPayment: true, dueDay: true, principal: true, interest: true,
-  currentPrice: true, quantity: true, price: true, fees: true
+  currentPrice: true, quantity: true, price: true, fees: true,
+  passwordIterations: true, failedLogins: true
 };
 
 /** Columns stored as TRUE/FALSE. */
@@ -52,7 +59,7 @@ const ID_PREFIX = {
 };
 
 const ENUMS = {
-  userStatus: ['invited', 'active', 'disabled'],
+  userStatus: ['active', 'disabled'],
   userRole: ['admin', 'member'],
   theme: ['system', 'light', 'dark'],
   accountType: ['cash', 'bank', 'savings', 'credit_card'],
@@ -90,7 +97,6 @@ const DEFAULT_CATEGORIES = [
 /** Script properties used by the backend (set in Project Settings > Script properties). */
 const PROP = {
   SPREADSHEET_ID: 'SPREADSHEET_ID',
-  GOOGLE_CLIENT_ID: 'GOOGLE_CLIENT_ID',
-  ADMIN_EMAILS: 'ADMIN_EMAILS',
-  INVITE_EMAILS: 'INVITE_EMAILS'
+  /** "username:password, username:password" — read and deleted by setup(). The first user is the admin. */
+  USERS: 'USERS'
 };

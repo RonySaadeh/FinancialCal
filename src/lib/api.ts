@@ -12,7 +12,7 @@ import { config } from '../config';
  */
 
 export type ApiErrorCode =
-  | 'AUTH' | 'NOT_REGISTERED' | 'FORBIDDEN' | 'VALIDATION' | 'NOT_FOUND' | 'CONFLICT' | 'BUSY'
+  | 'AUTH' | 'LOCKED' | 'FORBIDDEN' | 'VALIDATION' | 'NOT_FOUND' | 'CONFLICT' | 'BUSY'
   | 'CONFIG' | 'BAD_REQUEST' | 'UNKNOWN_ACTION' | 'INTERNAL' | 'NETWORK' | 'BAD_RESPONSE';
 
 export class ApiError extends Error {
@@ -139,13 +139,21 @@ export async function api<T>(action: string, payload: Record<string, unknown> = 
   }
 }
 
+type LoginResult = { token: string; expiresAt: string; user: import('./types').User };
+
 /** Public login call (no session yet). */
-export function login(idToken: string) {
-  return send<{ token: string; expiresAt: string; user: import('./types').User }>(
-    'login',
-    { idToken, userAgent: navigator.userAgent.slice(0, 300) },
-    null
-  );
+export function login(username: string, password: string) {
+  return send<LoginResult>('login', { username, password, userAgent: navigator.userAgent.slice(0, 300) }, null);
+}
+
+/** Public self-registration (only accepted when the administrator enabled it). */
+export function register(username: string, password: string, displayName: string) {
+  return send<LoginResult>('register', { username, password, displayName, userAgent: navigator.userAgent.slice(0, 300) }, null);
+}
+
+/** Public health check; tells the login screen whether registration is open. */
+export function health() {
+  return send<{ name: string; version: string; registrationEnabled: boolean }>('health', {}, null);
 }
 
 export function errorMessage(err: unknown): string {

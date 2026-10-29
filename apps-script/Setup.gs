@@ -31,13 +31,10 @@ function setup() {
     if (!allRecords_('AppSettings').some(function (s) { return s.userId === '' && s.key === 'registrationEnabled'; })) {
       setUserSetting_('', 'registrationEnabled', 'false');
     }
-    syncInvitedUsersInternal_();
+    applyUsersProperty_();
   });
 
   console.log('Setup complete. Spreadsheet: ' + ss.getUrl());
-  if (!props.getProperty(PROP.GOOGLE_CLIENT_ID)) {
-    console.warn('GOOGLE_CLIENT_ID script property is not set yet. Sign-in will fail until it is.');
-  }
 }
 
 function ensureSheet_(ss, name, columns) {
@@ -62,47 +59,63 @@ function ensureSheet_(ss, name, columns) {
   });
 }
 
-/** Invites the emails listed in the ADMIN_EMAILS / INVITE_EMAILS script properties. */
-function syncInvitedUsers() {
-  withLock_(syncInvitedUsersInternal_);
+/**
+ * Reads the USERS script property ("username:password, username:password"),
+ * creates missing users (the first one listed becomes admin if there is no
+ * admin yet) or resets the password of existing ones, then deletes the
+ * property so no plain-text password stays anywhere. Callers hold the lock.
+ */
+function applyUsersProperty_() {
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty(PROP.USERS);
+  if (!raw) {
+    if (!allRecords_('Users').length) console.warn('No users yet: add a USERS script property such as "rony:YourPassword, wife:HerPassword" and run setup() again.');
+    return;
+  }
+  const entries = raw.split(/[,\n]+/).map(function (e) { return e.trim(); }).filter(Boolean);
+  let hasAdmin = allRecords_('Users').some(function (u) { return u.role === 'admin'; });
+  const done = [];
+  entries.forEach(function (entry) {
+    const i = entry.indexOf(':');
+    if (i < 1) throw new Error('USERS entry "' + entry.split(':')[0] + '" must look like username:password');
+    const username = vUsername_(entry.slice(0, i));
+    const password = vPassword_(entry.slice(i + 1).trim(), 'Password for ' + username);
+    const existing = allRecords_('Users').find(function (u) { return u.username === username; });
+    if (existing) {
+      updateById_('Users', existing.id, Object.assign({ status: 'active' }, passwordFields_(password)));
+      deleteWhere_('Sessions', function (s) { return s.userId === existing.id; });
+      done.push(username + ' (password reset)');
+    } else {
+      createUser_(username, password, username.charAt(0).toUpperCase() + username.slice(1), hasAdmin ? 'member' : 'admin');
+      done.push(username + (hasAdmin ? '' : ' (admin)'));
+      hasAdmin = true;
+    }
+  });
+  props.deleteProperty(PROP.USERS);
+  console.log('Users ready: ' + done.join(', ') + '. The USERS property was deleted; passwords are stored only as hashes.');
 }
 
-function syncInvitedUsersInternal_() {
-  const parse = function (key) {
-    return (getProp_(key) || '').split(/[,;\s]+/).map(function (e) { return e.trim().toLowerCase(); }).filter(Boolean);
-  };
-  const admins = parse(PROP.ADMIN_EMAILS);
-  const members = parse(PROP.INVITE_EMAILS);
-  const invite = function (email, role) {
-    const existing = allRecords_('Users').find(function (u) { return u.email === email; });
-    if (!existing) {
-      inviteUser_(email, '', role);
-      console.log('Invited ' + email + ' as ' + role);
-    } else if (role === 'admin' && existing.role !== 'admin') {
-      updateById_('Users', existing.id, { role: 'admin' });
-      console.log('Promoted ' + email + ' to admin');
-    }
-  };
-  admins.forEach(function (e) { invite(e, 'admin'); });
-  members.forEach(function (e) { if (admins.indexOf(e) < 0) invite(e, 'member'); });
+/** Same as the user part of setup(): apply the USERS property (add users or reset passwords). */
+function applyUsers() {
+  withLock_(applyUsersProperty_);
 }
 
 /** Logs all users (no financial data). */
 function listUsers() {
   resetDbCache_();
   allRecords_('Users').forEach(function (u) {
-    console.log([u.email, u.displayName, u.status, u.role, u.googleSub ? 'linked' : 'not yet signed in'].join(' | '));
+    console.log([u.username, u.displayName, u.status, u.role, u.lockedUntil > nowIso_() ? 'locked' : ''].join(' | '));
   });
 }
 
 function enableRegistration() {
   withLock_(function () { setUserSetting_('', 'registrationEnabled', 'true'); });
-  console.log('Self-registration enabled: any verified Google account can create a Financial Cal account.');
+  console.log('Self-registration enabled: anyone with the site link can create an account.');
 }
 
 function disableRegistration() {
   withLock_(function () { setUserSetting_('', 'registrationEnabled', 'false'); });
-  console.log('Self-registration disabled: only invited users can sign in.');
+  console.log('Self-registration disabled: only users created by the administrator can sign in.');
 }
 
 /** Removes expired sessions. Optional: attach to a daily time-driven trigger. */
@@ -114,7 +127,7 @@ function purgeExpiredSessions() {
   });
 }
 
-/** Signs every user out (e.g. after rotating GOOGLE_CLIENT_ID). */
+/** Signs every user out. */
 function revokeAllSessions() {
   withLock_(function () {
     const n = deleteWhere_('Sessions', function () { return true; });

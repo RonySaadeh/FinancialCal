@@ -12,9 +12,10 @@ export type Theme = 'system' | 'light' | 'dark';
 
 export interface User {
   id: string;
+  username: string;
   email: string;
   displayName: string;
-  status: 'invited' | 'active' | 'disabled';
+  status: 'active' | 'disabled';
   role: 'admin' | 'member';
   preferredCurrency: string;
   theme: Theme;

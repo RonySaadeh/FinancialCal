@@ -8,8 +8,8 @@
  * in logs or browser history. Apps Script always answers HTTP 200, so the
  * JSON body carries { ok, data } or { ok: false, error: { code, message } }.
  *
- * Only actions listed in ROUTES can be called. Every route except `login`
- * and `health` requires a valid session; handlers receive the authenticated
+ * Only actions listed in routes_() can be called. Every route except `login`,
+ * `register` and `health` requires a valid session; handlers receive the authenticated
  * user from the session, never from the request payload.
  */
 
@@ -27,8 +27,10 @@ let ROUTES_ = null;
 function routes_() {
   if (ROUTES_) return ROUTES_;
   ROUTES_ = {
-    health: { handler: function () { return { name: 'Financial Cal API', version: APP_VERSION }; }, auth: false },
+    health: { handler: handleHealth_, auth: false },
     login: { handler: handleLogin_, auth: false },
+    register: { handler: handleRegister_, auth: false },
+    changePassword: { handler: handleChangePassword_, write: true },
     logout: { handler: handleLogout_, write: true },
     logoutAll: { handler: handleLogoutAll_, write: true },
 
@@ -85,7 +87,8 @@ function routes_() {
     deletePrice: { handler: handleDeletePrice_, write: true },
 
     adminListUsers: { handler: handleAdminListUsers_, admin: true },
-    adminInviteUser: { handler: handleAdminInviteUser_, write: true, admin: true },
+    adminCreateUser: { handler: handleAdminCreateUser_, write: true, admin: true },
+    adminResetPassword: { handler: handleAdminResetPassword_, write: true, admin: true },
     adminUpdateUser: { handler: handleAdminUpdateUser_, write: true, admin: true },
     adminSetRegistration: { handler: handleAdminSetRegistration_, write: true, admin: true }
   };
@@ -105,7 +108,8 @@ function handleGetBootstrap_(ctx) {
 
 /** GET is a health check only; it never returns user data. */
 function doGet() {
-  return jsonOutput_({ ok: true, data: { name: 'Financial Cal API', version: APP_VERSION } });
+  resetDbCache_();
+  return jsonOutput_({ ok: true, data: handleHealth_() });
 }
 
 function doPost(e) {

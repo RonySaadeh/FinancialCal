@@ -5,7 +5,7 @@ This folder is the whole backend: a Google Apps Script **Web App** that stores d
 | File | Purpose |
 | --- | --- |
 | `Code.gs` | `doGet`/`doPost` entry points, the explicit API allow-list (`routes_()`), request validation, error handling |
-| `Auth.gs` | Google ID-token verification, sessions, profile, exchange rates, admin user management |
+| `Auth.gs` | Username/password login (PBKDF2 hashes, lockout), sessions, profile, exchange rates, admin user management |
 | `Db.gs` | All spreadsheet access: typed rows, per-user filtering, formula escaping, `LockService` wrapper |
 | `Validation.gs` | Input validators (amounts, dates, IDs, enums, currencies…) |
 | `Calc.gs` | Pure financial calculations (balances, average cost basis, debts, net worth, cash flow) |
@@ -14,50 +14,35 @@ This folder is the whole backend: a Google Apps Script **Web App** that stores d
 | `Config.gs` | Sheet schema, enums, default categories, constants |
 | `appsscript.json` | Manifest: V8 runtime, `Asia/Dubai` time zone, scopes, web-app settings |
 
-## 1. Create a Google OAuth client ID (for "Sign in with Google")
-
-1. Open <https://console.cloud.google.com/>, create (or pick) a project, e.g. `financial-cal`.
-2. **APIs & Services → OAuth consent screen**: choose *External*, fill in the app name and your email. The app only requests `openid email profile`, which are non-sensitive, so no Google verification is needed. While the app is in *Testing*, add your and your family's Gmail addresses as *test users* (or click *Publish app*).
-3. **APIs & Services → Credentials → Create credentials → OAuth client ID**, type **Web application**.
-   - *Authorized JavaScript origins*: `https://<your-github-username>.github.io` (for this repository `https://ronysaadeh.github.io`) and, for local development, `http://localhost:5173`.
-   - No redirect URIs are needed (the button uses popup mode).
-4. Copy the **Client ID** (`…apps.googleusercontent.com`). It is public, not a secret.
-
-## 2. Create the spreadsheet and the script
+## 1. Create the spreadsheet and the script
 
 1. In Google Drive create a blank spreadsheet called `Financial Cal Database` and copy its ID from the URL: `https://docs.google.com/spreadsheets/d/<THIS_PART>/edit`.
    (Alternatively skip this: `setup()` creates a spreadsheet for you and saves its ID.)
 2. Open <https://script.google.com/> → **New project**, name it `Financial Cal API`.
 3. Copy the code in, either:
    - **By hand**: in the editor enable *Project Settings → Show "appsscript.json" manifest file*, then create one script file per `.gs` file here (same names, without `.gs`) and paste the contents, and paste `appsscript.json` over the manifest; or
-   - **With clasp** (recommended, see below).
+   - **With clasp** (see below).
 4. **Project Settings → Script properties → Add script property**:
 
    | Property | Value |
    | --- | --- |
    | `SPREADSHEET_ID` | the spreadsheet ID from step 1 (optional if you let `setup()` create one) |
-   | `GOOGLE_CLIENT_ID` | the OAuth client ID from section 1 |
-   | `ADMIN_EMAILS` | your Google email (comma-separated list allowed) |
-   | `INVITE_EMAILS` | other family members' Google emails, e.g. your wife's |
+   | `USERS` | `rony:YourPassword, wife:HerPassword` — usernames and first passwords (8+ characters, no commas). The first one becomes the administrator. |
 
-5. In the editor select the function **`setup`** and click **Run**. Google asks for authorization: choose your account → *Advanced* → *Go to Financial Cal API (unsafe)* → *Allow*. (The warning appears because it is your own unverified script.) Scopes requested: Google Sheets (the database) and external requests (to verify Google sign-in tokens).
-   `setup()` creates every sheet with headers, formats text columns as plain text, and invites the emails from `ADMIN_EMAILS` / `INVITE_EMAILS`. It is safe to run again at any time (e.g. after changing those properties or upgrading).
+5. In the editor select the function **`setup`** and click **Run**. Google asks for authorization: choose your account → *Advanced* → *Go to Financial Cal API (unsafe)* → *Allow*. (The warning appears because it is your own unverified script.) The only permission requested is access to Google Sheets.
+   `setup()` creates every sheet with headers, creates the users with **hashed** passwords, and then **deletes the `USERS` property**, so no plain-text password is left anywhere. It is safe to run again at any time.
 
-## 3. Deploy as a Web App
+**Adding a user or resetting a password later:** use the **Users** page in the app (administrators), or add a `USERS` property again (e.g. `wife:NewPassword`) and run `setup()` (or `applyUsers()`): existing usernames get the new password, new usernames are created.
+
+## 2. Deploy as a Web App
 
 1. **Deploy → New deployment → ⚙ → Web app**.
 2. *Execute as*: **Me**. *Who has access*: **Anyone**.
 3. **Deploy** and copy the **Web app URL** ending in `/exec`. This is `VITE_API_URL` for the frontend.
 
-Why "Anyone"? The GitHub Pages site calls the API with `fetch()` from another origin, without Google cookies. With "Anyone with a Google account" Google would answer with a login page instead of JSON. "Anyone" only means the URL is reachable; **every request except `health` and `login` requires a valid Financial Cal session, and every handler only touches the caller's own rows.** The script runs as you, which is why only you need access to the spreadsheet.
+Why "Anyone"? The GitHub Pages site calls the API with `fetch()` from another origin, without Google cookies. With "Anyone with a Google account" Google would answer with a login page instead of JSON. "Anyone" only means the URL is reachable; **every request except `health`, `login` and `register` requires a valid Financial Cal session, and every handler only touches the caller's own rows.** The script runs as you, which is why only you need access to the spreadsheet.
 
-Quick check (should return `{"ok":true,"data":{"name":"Financial Cal API",...}}`):
-
-```bash
-curl -L "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec"
-```
-
-And an unauthenticated data request must be refused:
+Quick check: open the `/exec` URL in a browser. It should show `{"ok":true,"data":{"name":"Financial Cal API",...}}`. An unauthenticated data request must be refused:
 
 ```bash
 curl -L -H "Content-Type: text/plain" -d '{"action":"getDashboard"}' "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec"
@@ -104,11 +89,11 @@ Responses are always JSON (Apps Script cannot set HTTP status codes):
 { "ok": false, "error": { "code": "VALIDATION", "message": "Amount must be greater than zero." } }
 ```
 
-Error codes: `AUTH`, `NOT_REGISTERED`, `FORBIDDEN`, `VALIDATION`, `NOT_FOUND`, `CONFLICT`, `BUSY`, `CONFIG`, `BAD_REQUEST`, `UNKNOWN_ACTION`, `INTERNAL`.
+Error codes: `AUTH`, `LOCKED`, `FORBIDDEN`, `VALIDATION`, `NOT_FOUND`, `CONFLICT`, `BUSY`, `CONFIG`, `BAD_REQUEST`, `UNKNOWN_ACTION`, `INTERNAL`.
 
 Actions (the complete allow-list is `routes_()` in `Code.gs`; anything else returns `UNKNOWN_ACTION`):
 
-- Auth/profile: `login`, `logout`, `logoutAll`, `getProfile`, `updateProfile`, `setExchangeRate`, `deleteExchangeRate`, `getBootstrap`, `health`
+- Auth/profile: `health`, `login`, `register`, `logout`, `logoutAll`, `changePassword`, `getProfile`, `updateProfile`, `setExchangeRate`, `deleteExchangeRate`, `getBootstrap`
 - Dashboard/reports: `getDashboard`, `getReports`
 - Accounts: `getAccounts`, `addAccount`, `updateAccount`, `deleteAccount`
 - Transactions: `getTransactions`, `addTransaction`, `updateTransaction`, `deleteTransaction`, `recordRecurring`
@@ -117,7 +102,7 @@ Actions (the complete allow-list is `routes_()` in `Code.gs`; anything else retu
 - Savings goals: `getSavingsGoals`, `addSavingsGoal`, `updateSavingsGoal`, `deleteSavingsGoal`, `addGoalContribution`, `deleteGoalContribution`
 - Debts: `getDebts`, `addDebt`, `updateDebt`, `deleteDebt`, `addDebtPayment`, `deleteDebtPayment`
 - Investments: `getInvestments`, `addInvestment`, `updateInvestment`, `deleteInvestment`, `addInvestmentTransaction`, `deleteInvestmentTransaction`, `updateInvestmentPrice`, `deletePrice`
-- Admin (role `admin` only, user metadata only): `adminListUsers`, `adminInviteUser`, `adminUpdateUser`, `adminSetRegistration`
+- Admin (role `admin` only, user metadata only): `adminListUsers`, `adminCreateUser`, `adminResetPassword`, `adminUpdateUser`, `adminSetRegistration`
 
 ### Why `text/plain`, and CORS
 
@@ -133,6 +118,7 @@ A `fetch` with `Content-Type: application/json` or an `Authorization` header tri
 - Money is stored as numbers rounded to 2 decimals (quantities/prices up to 8).
 - Text starting with `= + - @` is stored with a leading apostrophe so it can never run as a formula.
 - `Sessions.tokenHash` is the SHA-256 of the session token; the token itself is never stored.
+- `Users.passwordHash` is PBKDF2-HMAC-SHA256 (5,000 iterations, random 16-byte salt per user). After 5 wrong passwords an account is locked for 15 minutes.
 
 Please don't edit the sheets by hand while the app is in use; if you do, keep the header row intact.
 
@@ -140,17 +126,17 @@ Please don't edit the sheets by hand while the app is in use; if you do, keep th
 
 | Function | What it does |
 | --- | --- |
-| `setup()` | Creates/upgrades sheets, invites `ADMIN_EMAILS`/`INVITE_EMAILS` |
-| `syncInvitedUsers()` | Re-reads `ADMIN_EMAILS`/`INVITE_EMAILS` and invites new addresses |
+| `setup()` | Creates/upgrades sheets, applies the `USERS` property, then deletes it |
+| `applyUsers()` | Only applies the `USERS` property (add users / reset passwords) |
 | `listUsers()` | Logs users (no financial data) |
-| `enableRegistration()` / `disableRegistration()` | Toggle self-registration (default: off, invite-only) |
+| `enableRegistration()` / `disableRegistration()` | Toggle self-registration (default: off — only accounts the admin creates) |
 | `purgeExpiredSessions()` | Deletes expired sessions (can be put on a daily time-driven trigger) |
 | `revokeAllSessions()` | Signs everyone out |
 
 ## Concurrency
 
-Every write runs inside `LockService.getScriptLock()` (15 s timeout) so read-modify-write sequences never interleave; the lock is held only for spreadsheet work. The slow network call that verifies a Google sign-in happens *before* the lock is taken. If the lock can't be acquired the API returns `BUSY` and the client retries once (the write was not applied).
+Every write runs inside `LockService.getScriptLock()` (15 s timeout) so read-modify-write sequences never interleave; the lock is held only for spreadsheet work. If the lock can't be acquired the API returns `BUSY` and the client retries once (the write was not applied).
 
 ## Testing without Google
 
-`npm test` runs these exact `.gs` files inside Node with in-memory fakes of the Google services (`scripts/gas-harness.mjs`) and checks authentication, two-user data isolation, validation and all financial rules. `npm run dev:backend` serves the same code on `http://localhost:8787` for local UI development.
+`npm test` runs these exact `.gs` files inside Node with in-memory fakes of the Google services (`scripts/gas-harness.mjs`) and checks login, lockout, password hashing, two-user data isolation, validation and all financial rules. `npm run dev:backend` serves the same code on `http://localhost:8787` for local UI development.

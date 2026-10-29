@@ -8,7 +8,7 @@
  * unescaped user input.
  */
 import { readFileSync, readdirSync } from 'node:fs';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
@@ -96,6 +96,9 @@ class FakeSpreadsheet {
   deleteSheet(sheet) { this.sheets = this.sheets.filter((s) => s !== sheet); }
 }
 
+const toSigned = (buf) => Array.from(buf).map((b) => (b > 127 ? b - 256 : b));
+const toBuffer = (bytes) => Buffer.from(bytes.map((b) => (b < 0 ? b + 256 : b)));
+
 function formatDate(date, tz, fmt) {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -109,7 +112,6 @@ function formatDate(date, tz, fmt) {
 /**
  * Creates an isolated Apps Script environment.
  * @param {object} opts
- * @param {(idToken: string) => object|null} opts.tokenInfo  Simulates Google's tokeninfo endpoint; return claims or null (invalid).
  * @param {Record<string,string>} [opts.properties]  Initial script properties.
  * @param {() => string} [opts.today]  Overrides "today" (yyyy-MM-dd) for deterministic tests.
  */
@@ -117,7 +119,6 @@ export function createGasEnvironment(opts = {}) {
   const spreadsheets = new Map();
   const properties = new Map(Object.entries(opts.properties || {}));
   let lockHeld = false;
-  const stats = { tokenInfoCalls: 0 };
 
   const sandbox = {
     console: opts.quiet ? { log() {}, warn() {}, error() {} } : console,
@@ -137,7 +138,8 @@ export function createGasEnvironment(opts = {}) {
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: (k) => (properties.has(k) ? properties.get(k) : null),
-        setProperty: (k, v) => { properties.set(k, String(v)); }
+        setProperty: (k, v) => { properties.set(k, String(v)); },
+        deleteProperty: (k) => { properties.delete(k); }
       })
     },
     LockService: {
@@ -158,22 +160,22 @@ export function createGasEnvironment(opts = {}) {
     Utilities: {
       getUuid: () => randomUUID(),
       DigestAlgorithm: { SHA_256: 'sha256' },
+      MacAlgorithm: { HMAC_SHA_256: 'sha256' },
       Charset: { UTF_8: 'utf8' },
       computeDigest(alg, text) {
-        return Array.from(createHash(alg).update(text, 'utf8').digest()).map((b) => (b > 127 ? b - 256 : b));
+        return toSigned(createHash(alg).update(text, 'utf8').digest());
+      },
+      computeHmacSignature(alg, value, key) {
+        return toSigned(createHmac(alg, toBuffer(key)).update(toBuffer(value)).digest());
+      },
+      newBlob(text) {
+        return { getBytes: () => toSigned(Buffer.from(String(text), 'utf8')) };
       },
       formatDate
     },
     UrlFetchApp: {
       fetch(url) {
-        const m = /^https:\/\/oauth2\.googleapis\.com\/tokeninfo\?id_token=(.*)$/.exec(url);
-        if (!m) throw new Error('Unexpected UrlFetch in harness: ' + url);
-        stats.tokenInfoCalls++;
-        const claims = opts.tokenInfo ? opts.tokenInfo(decodeURIComponent(m[1])) : null;
-        return {
-          getResponseCode: () => (claims ? 200 : 400),
-          getContentText: () => JSON.stringify(claims || { error: 'invalid_token' })
-        };
+        throw new Error('The backend should not make network requests: ' + url);
       }
     },
     ContentService: {
@@ -196,7 +198,6 @@ export function createGasEnvironment(opts = {}) {
 
   const env = {
     context,
-    stats,
     properties,
     spreadsheets,
     /** Evaluates an expression (e.g. a global function name) inside the Apps Script context. */

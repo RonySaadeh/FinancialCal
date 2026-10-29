@@ -3,7 +3,7 @@
  * End-to-end smoke test of the real UI against the local dev backend.
  *
  *   npm run dev:backend   (fresh .dev-data)
- *   VITE_API_URL=http://localhost:8787 VITE_DEV_AUTH=true npm run dev
+ *   npm run dev:local
  *   node tests/e2e/smoke.mjs [screenshotDir]
  *
  * Signs in as two independent users and checks that each sees only their own
@@ -34,13 +34,21 @@ async function shot(page, name) {
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true });
 }
 
+const PASSWORDS = { rony: 'rony-password', wife: 'wife-password' };
+
 async function signIn(browser, email, theme = 'light') {
+  const username = email.split('@')[0];
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, colorScheme: theme });
   const page = await ctx.newPage();
   page.on('console', (m) => { if (m.type() === 'error') errors.push(`[${email}] ${m.text()}`); });
   page.on('pageerror', (e) => errors.push(`[${email}] pageerror ${e.message}`));
   await page.goto(BASE);
-  await page.getByLabel('Email').fill(email);
+  // A wrong password is refused first.
+  await page.getByLabel('Username').fill(username);
+  await page.getByLabel('Password', { exact: true }).fill('wrong-password');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByText('Incorrect username or password.').waitFor();
+  await page.getByLabel('Password', { exact: true }).fill(PASSWORDS[username]);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await page.getByRole('heading', { name: /Good (morning|afternoon|evening)/ }).waitFor();
   return { ctx, page };
@@ -243,7 +251,7 @@ try {
   assert(true, 'exchange rate saved');
   await shot(a, '09-profile');
   await go(a, '/admin', 'Users');
-  assert(await a.getByText('wife@example.com').isVisible(), 'admin sees invited user (metadata only)');
+  assert(await a.getByText('@wife').isVisible(), 'admin sees the other user (metadata only)');
 
   // Deep link refresh works with hash routing
   await a.goto(BASE + '#/investments');

@@ -1,50 +1,96 @@
 /**
- * Authentication: Google Sign-In ID tokens verified server-side, then an
- * opaque server-side session.
+ * Authentication: username + password, checked on the server, then an opaque
+ * server-side session.
  *
- * Why not Session.getActiveUser()? This web app is deployed "Execute as: Me /
- * Anyone", so the script runs as the owner and getActiveUser() is empty for
- * other visitors. Instead the browser obtains a Google ID token (Google
- * Identity Services) and we verify it with Google's tokeninfo endpoint,
- * checking audience, issuer, expiry and email verification. Users are bound to
- * the token's stable `sub` claim, never to an ID supplied by the frontend.
+ * Passwords are never stored in plain text anywhere. They are hashed with
+ * PBKDF2-HMAC-SHA256 (random 16-byte salt per user) and only the hash and
+ * salt are kept in the private Users sheet. The usernames and first
+ * passwords are entered once in the private Apps Script settings (script
+ * property USERS); setup() hashes them and then deletes that property.
  *
- * Sessions: a random token (two v4 UUIDs, ~244 random bits) is returned to the browser once. Only its
- * SHA-256 hash is stored in the Sessions sheet, so a leaked spreadsheet does
- * not leak usable sessions.
+ * Brute force: after MAX_FAILED_LOGINS wrong passwords an account is locked
+ * for LOCKOUT_MINUTES. Error messages never reveal whether a username exists.
+ *
+ * Sessions: a random token (two v4 UUIDs, ~244 random bits) is returned to the
+ * browser once. Only its SHA-256 hash is stored in the Sessions sheet, so a
+ * leaked spreadsheet does not leak usable sessions.
  */
-
-const GOOGLE_ISSUERS = ['accounts.google.com', 'https://accounts.google.com'];
 
 function getProp_(key) {
   return PropertiesService.getScriptProperties().getProperty(key) || '';
 }
 
-/** Verifies a Google ID token and returns the verified identity. */
-function verifyGoogleIdToken_(idToken) {
-  if (typeof idToken !== 'string' || idToken.length < 20 || idToken.length > 4096) {
-    throw apiError_('AUTH', 'Missing or malformed Google credential.');
-  }
-  const clientId = getProp_(PROP.GOOGLE_CLIENT_ID);
-  if (!clientId) throw apiError_('CONFIG', 'The backend is not configured: GOOGLE_CLIENT_ID script property is missing.');
+function bytesToHex_(bytes) {
+  return bytes.map(function (b) {
+    const v = (b < 0 ? b + 256 : b).toString(16);
+    return v.length === 1 ? '0' + v : v;
+  }).join('');
+}
 
-  const resp = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken), {
-    muteHttpExceptions: true,
-    followRedirects: false
-  });
-  if (resp.getResponseCode() !== 200) throw apiError_('AUTH', 'Google sign-in could not be verified. Please sign in again.');
-  let info;
-  try {
-    info = JSON.parse(resp.getContentText());
-  } catch (e) {
-    throw apiError_('AUTH', 'Google sign-in could not be verified.');
+function hexToBytes_(hex) {
+  const out = [];
+  for (let i = 0; i < hex.length; i += 2) {
+    const v = parseInt(hex.substr(i, 2), 16);
+    out.push(v > 127 ? v - 256 : v);
   }
-  if (info.aud !== clientId) throw apiError_('AUTH', 'This Google credential was not issued for Financial Cal.');
-  if (GOOGLE_ISSUERS.indexOf(info.iss) < 0) throw apiError_('AUTH', 'Unexpected credential issuer.');
-  if (!(Number(info.exp) * 1000 > Date.now())) throw apiError_('AUTH', 'Your Google sign-in has expired. Please sign in again.');
-  if (String(info.email_verified) !== 'true') throw apiError_('AUTH', 'Your Google account email is not verified.');
-  if (!info.sub || !info.email) throw apiError_('AUTH', 'Google credential is missing required claims.');
-  return { sub: String(info.sub), email: String(info.email).toLowerCase(), name: String(info.name || '') };
+  return out;
+}
+
+function newSaltHex_() {
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Utilities.getUuid() + Utilities.getUuid() + Date.now(), Utilities.Charset.UTF_8);
+  return bytesToHex_(bytes.slice(0, 16));
+}
+
+/** PBKDF2-HMAC-SHA256, one 32-byte block (RFC 8018). Returns hex. */
+function pbkdf2Hex_(password, saltHex, iterations) {
+  const alg = Utilities.MacAlgorithm.HMAC_SHA_256;
+  const key = Utilities.newBlob(password).getBytes();
+  let u = Utilities.computeHmacSignature(alg, hexToBytes_(saltHex).concat([0, 0, 0, 1]), key);
+  const t = u.slice();
+  for (let i = 1; i < iterations; i++) {
+    u = Utilities.computeHmacSignature(alg, u, key);
+    for (let j = 0; j < t.length; j++) t[j] ^= u[j];
+  }
+  return bytesToHex_(t);
+}
+
+/** Compares two equal-length hex strings without short-circuiting. */
+function safeEqual_(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function vUsername_(v) {
+  const s = vString_(v, 'Username', { required: true, max: 32 }).toLowerCase();
+  if (!/^[a-z0-9._-]{3,32}$/.test(s)) throw apiError_('VALIDATION', 'Username must be 3-32 characters: letters, numbers, dot, dash or underscore.');
+  return s;
+}
+
+function vPassword_(v, field) {
+  if (typeof v !== 'string' || v.length < MIN_PASSWORD_LENGTH) {
+    throw apiError_('VALIDATION', (field || 'Password') + ' must be at least ' + MIN_PASSWORD_LENGTH + ' characters.');
+  }
+  if (v.length > 200) throw apiError_('VALIDATION', (field || 'Password') + ' is too long.');
+  return v;
+}
+
+/** Fields to store for a new password. */
+function passwordFields_(password) {
+  const salt = newSaltHex_();
+  return {
+    passwordSalt: salt,
+    passwordIterations: PASSWORD_ITERATIONS,
+    passwordHash: pbkdf2Hex_(password, salt, PASSWORD_ITERATIONS),
+    failedLogins: 0,
+    lockedUntil: ''
+  };
+}
+
+function passwordMatches_(user, password) {
+  if (!user || !user.passwordHash || !user.passwordSalt) return false;
+  return safeEqual_(pbkdf2Hex_(password, user.passwordSalt, Number(user.passwordIterations) || PASSWORD_ITERATIONS), user.passwordHash);
 }
 
 function registrationEnabled_() {
@@ -55,6 +101,7 @@ function registrationEnabled_() {
 function publicUser_(user) {
   return {
     id: user.id,
+    username: user.username,
     email: user.email,
     displayName: user.displayName,
     status: user.status,
@@ -78,58 +125,104 @@ function seedUserDefaults_(userId) {
   }));
 }
 
-/**
- * action: login. Public (no session). The token verification network call
- * happens before taking the lock so slow Google responses do not block writers.
- */
+/** Creates a user with a hashed password. Callers hold the lock. */
+function createUser_(username, password, displayName, role) {
+  if (allRecords_('Users').some(function (u) { return u.username === username; })) {
+    throw apiError_('CONFLICT', 'The username "' + username + '" is already taken.');
+  }
+  const now = nowIso_();
+  return insertRecord_('Users', Object.assign({
+    id: newId_('Users'), username: username, email: '', displayName: displayName || username,
+    status: 'active', role: role, preferredCurrency: DEFAULT_CURRENCY, theme: 'system',
+    createdAt: now, updatedAt: now, lastLoginAt: ''
+  }, passwordFields_(password)));
+}
+
+/** Creates a session for the user and returns the login response. Callers hold the lock. */
+function startSession_(user, userAgent) {
+  const now = nowIso_();
+  user = updateById_('Users', user.id, { lastLoginAt: now, failedLogins: 0, lockedUntil: '' });
+  seedUserDefaults_(user.id);
+  // Housekeeping: drop expired sessions.
+  deleteWhere_('Sessions', function (s) { return s.expiresAt < now; });
+  const token = newSessionToken_();
+  const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 86400000).toISOString();
+  insertRecord_('Sessions', {
+    id: newId_('Sessions'), tokenHash: sha256Hex_(token), userId: user.id,
+    createdAt: now, expiresAt: expiresAt, userAgent: userAgent
+  });
+  return { token: token, expiresAt: expiresAt, user: publicUser_(user) };
+}
+
+const BAD_LOGIN = 'Incorrect username or password.';
+
+/** action: login (public). */
 function handleLogin_(ctx, payload) {
-  vPayload_(payload, ['idToken', 'userAgent']);
-  const identity = verifyGoogleIdToken_(payload.idToken);
+  vPayload_(payload, ['username', 'password', 'userAgent']);
+  const username = typeof payload.username === 'string' ? payload.username.trim().toLowerCase() : '';
+  const password = typeof payload.password === 'string' ? payload.password : '';
   const userAgent = vString_(payload.userAgent, 'userAgent', { max: 300 });
+  if (!username || !password || password.length > 200) throw apiError_('AUTH', BAD_LOGIN);
 
   return withLock_(function () {
-    const users = allRecords_('Users');
-    let user = users.find(function (u) { return u.googleSub === identity.sub; });
-    const now = nowIso_();
-
+    const user = allRecords_('Users').find(function (u) { return u.username === username; });
     if (!user) {
-      const byEmail = users.find(function (u) { return u.email === identity.email; });
-      if (byEmail && byEmail.googleSub) {
-        // The email now belongs to a different Google account than the one bound earlier.
-        throw apiError_('AUTH', 'This email is linked to a different Google account. Ask the administrator for help.');
-      }
-      if (byEmail) {
-        user = updateById_('Users', byEmail.id, { googleSub: identity.sub });
-      } else if (registrationEnabled_()) {
-        user = insertRecord_('Users', {
-          id: newId_('Users'), googleSub: identity.sub, email: identity.email,
-          displayName: identity.name || identity.email.split('@')[0], status: 'active', role: 'member',
-          preferredCurrency: DEFAULT_CURRENCY, theme: 'system', createdAt: now, updatedAt: now, lastLoginAt: ''
-        });
-      } else {
-        throw apiError_('NOT_REGISTERED', 'This Google account is not registered for Financial Cal. Ask the administrator to invite ' + identity.email + '.');
-      }
+      // Spend the same effort as a real check so timing does not reveal valid usernames.
+      pbkdf2Hex_(password, '00000000000000000000000000000000', PASSWORD_ITERATIONS);
+      throw apiError_('AUTH', BAD_LOGIN);
     }
-
-    if (user.status === 'disabled') throw apiError_('FORBIDDEN', 'This account has been disabled by the administrator.');
-
-    const changes = { lastLoginAt: now };
-    if (user.status === 'invited') changes.status = 'active';
-    if (!user.displayName) changes.displayName = identity.name || identity.email.split('@')[0];
-    user = updateById_('Users', user.id, changes);
-    seedUserDefaults_(user.id);
-
-    // Housekeeping: drop expired sessions.
-    deleteWhere_('Sessions', function (s) { return s.expiresAt < now; });
-
-    const token = newSessionToken_();
-    const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 86400000).toISOString();
-    insertRecord_('Sessions', {
-      id: newId_('Sessions'), tokenHash: sha256Hex_(token), userId: user.id,
-      createdAt: now, expiresAt: expiresAt, userAgent: userAgent
-    });
-    return { token: token, expiresAt: expiresAt, user: publicUser_(user) };
+    const now = nowIso_();
+    if (user.lockedUntil && user.lockedUntil > now) {
+      throw apiError_('LOCKED', 'Too many wrong passwords. Try again in ' + LOCKOUT_MINUTES + ' minutes.');
+    }
+    if (!passwordMatches_(user, password)) {
+      const failed = (Number(user.failedLogins) || 0) + 1;
+      if (failed >= MAX_FAILED_LOGINS) {
+        updateById_('Users', user.id, { failedLogins: 0, lockedUntil: new Date(Date.now() + LOCKOUT_MINUTES * 60000).toISOString() });
+        throw apiError_('LOCKED', 'Too many wrong passwords. Try again in ' + LOCKOUT_MINUTES + ' minutes.');
+      }
+      updateById_('Users', user.id, { failedLogins: failed });
+      throw apiError_('AUTH', BAD_LOGIN);
+    }
+    if (user.status !== 'active') throw apiError_('FORBIDDEN', 'This account has been disabled by the administrator.');
+    return startSession_(user, userAgent);
   });
+}
+
+/** action: register (public) — only works when the administrator enabled self-registration. */
+function handleRegister_(ctx, payload) {
+  vPayload_(payload, ['username', 'password', 'displayName', 'userAgent']);
+  const username = vUsername_(payload.username);
+  const password = vPassword_(payload.password);
+  const displayName = vString_(payload.displayName, 'Display name', { max: 80 });
+  const userAgent = vString_(payload.userAgent, 'userAgent', { max: 300 });
+  return withLock_(function () {
+    if (!registrationEnabled_()) throw apiError_('FORBIDDEN', 'Registration is closed. Ask the administrator to create your account.');
+    return startSession_(createUser_(username, password, displayName, 'member'), userAgent);
+  });
+}
+
+/** action: health (public) — no user data, just what the login screen needs. */
+function handleHealth_() {
+  let registration = false;
+  try {
+    registration = registrationEnabled_();
+  } catch (e) {
+    registration = false;
+  }
+  return { name: 'Financial Cal API', version: APP_VERSION, registrationEnabled: registration };
+}
+
+/** Changes the caller's password and signs out their other devices. */
+function handleChangePassword_(ctx, payload) {
+  vPayload_(payload, ['currentPassword', 'newPassword']);
+  if (!passwordMatches_(ctx.user, typeof payload.currentPassword === 'string' ? payload.currentPassword : '')) {
+    throw apiError_('VALIDATION', 'Your current password is incorrect.');
+  }
+  const newPassword = vPassword_(payload.newPassword, 'New password');
+  updateById_('Users', ctx.userId, passwordFields_(newPassword));
+  const removed = deleteWhere_('Sessions', function (s) { return s.userId === ctx.userId && s.id !== ctx.sessionId; });
+  return { changed: true, otherSessionsSignedOut: removed };
 }
 
 /**
@@ -197,8 +290,9 @@ function handleGetProfile_(ctx) {
 }
 
 function handleUpdateProfile_(ctx, payload) {
-  vPayload_(payload, ['displayName', 'preferredCurrency', 'theme']);
+  vPayload_(payload, ['displayName', 'email', 'preferredCurrency', 'theme']);
   const changes = {};
+  if (payload.email !== undefined) changes.email = isBlank_(payload.email) ? '' : vEmail_(payload.email, 'Email');
   if (payload.displayName !== undefined) changes.displayName = vString_(payload.displayName, 'Display name', { required: true, max: 80 });
   if (payload.preferredCurrency !== undefined) changes.preferredCurrency = vCurrency_(payload.preferredCurrency, 'Preferred currency', { required: true });
   if (payload.theme !== undefined) changes.theme = vEnum_(payload.theme, 'Theme', ENUMS.theme);
@@ -248,25 +342,24 @@ function handleAdminListUsers_() {
   };
 }
 
-function handleAdminInviteUser_(ctx, payload) {
-  vPayload_(payload, ['email', 'displayName', 'role']);
-  const email = vEmail_(payload.email, 'Email');
+function handleAdminCreateUser_(ctx, payload) {
+  vPayload_(payload, ['username', 'password', 'displayName', 'role']);
+  const username = vUsername_(payload.username);
+  const password = vPassword_(payload.password);
   const displayName = vString_(payload.displayName, 'Display name', { max: 80 });
   const role = vEnum_(payload.role, 'Role', ENUMS.userRole, { defaultValue: 'member' });
-  return publicUser_(inviteUser_(email, displayName, role));
+  return publicUser_(createUser_(username, password, displayName, role));
 }
 
-/** Creates an invited user that becomes active on first Google sign-in. Callers hold the lock. */
-function inviteUser_(email, displayName, role) {
-  if (allRecords_('Users').some(function (u) { return u.email === email; })) {
-    throw apiError_('CONFLICT', 'A user with this email already exists.');
-  }
-  const now = nowIso_();
-  return insertRecord_('Users', {
-    id: newId_('Users'), googleSub: '', email: email, displayName: displayName || email.split('@')[0],
-    status: 'invited', role: role, preferredCurrency: DEFAULT_CURRENCY, theme: 'system',
-    createdAt: now, updatedAt: now, lastLoginAt: ''
-  });
+/** Sets a new password for a user (e.g. a forgotten password) and signs them out everywhere. */
+function handleAdminResetPassword_(ctx, payload) {
+  vPayload_(payload, ['id', 'password']);
+  const id = vId_(payload.id, 'User ID', 'Users');
+  const password = vPassword_(payload.password, 'New password');
+  if (!allRecords_('Users').some(function (u) { return u.id === id; })) throw apiError_('NOT_FOUND', 'User not found.');
+  updateById_('Users', id, passwordFields_(password));
+  deleteWhere_('Sessions', function (s) { return s.userId === id && s.id !== ctx.sessionId; });
+  return { reset: true };
 }
 
 function handleAdminUpdateUser_(ctx, payload) {
@@ -275,7 +368,7 @@ function handleAdminUpdateUser_(ctx, payload) {
   const target = allRecords_('Users').find(function (u) { return u.id === id; });
   if (!target) throw apiError_('NOT_FOUND', 'User not found.');
   const changes = {};
-  if (payload.status !== undefined) changes.status = vEnum_(payload.status, 'Status', ['active', 'disabled', 'invited']);
+  if (payload.status !== undefined) changes.status = vEnum_(payload.status, 'Status', ENUMS.userStatus);
   if (payload.role !== undefined) changes.role = vEnum_(payload.role, 'Role', ENUMS.userRole);
   if (payload.displayName !== undefined) changes.displayName = vString_(payload.displayName, 'Display name', { required: true, max: 80 });
   if (id === ctx.userId && (changes.status === 'disabled' || changes.role === 'member')) {

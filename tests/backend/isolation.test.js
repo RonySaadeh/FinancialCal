@@ -4,8 +4,8 @@ import { newEnv, signIn } from './helpers.js';
 /** Two independent users (the family use case): neither can see or touch the other's records. */
 function twoUsers() {
   const env = newEnv();
-  const rony = signIn(env, 'sub-rony', 'rony@example.com');
-  const wife = signIn(env, 'sub-wife', 'wife@example.com');
+  const rony = signIn(env, 'rony');
+  const wife = signIn(env, 'wife');
 
   const bank = rony.ok('addAccount', { name: 'Rony Bank', type: 'bank', openingBalance: 5000 });
   const groceries = rony.category('Groceries');
