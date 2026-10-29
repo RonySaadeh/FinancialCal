@@ -34,7 +34,9 @@ function setup() {
     applyUsersProperty_();
   });
 
-  console.log('Setup complete. Spreadsheet: ' + ss.getUrl());
+  const names = allRecords_('Users').map(function (u) { return u.username + (u.role === 'admin' ? ' (admin)' : ''); });
+  console.log('Setup complete. Database spreadsheet: ' + ss.getUrl());
+  console.log(names.length ? 'Accounts that can sign in: ' + names.join(', ') : 'No accounts yet: add the USERS script property and run setup again.');
 }
 
 function ensureSheet_(ss, name, columns) {

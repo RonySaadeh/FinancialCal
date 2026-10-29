@@ -165,7 +165,11 @@ function handleLogin_(ctx, payload) {
   if (!username || !password || password.length > 200) throw apiError_('AUTH', BAD_LOGIN);
 
   return withLock_(function () {
-    const user = allRecords_('Users').find(function (u) { return u.username === username; });
+    const users = allRecords_('Users');
+    if (!users.length) {
+      throw apiError_('CONFIG', 'No accounts exist yet. In Apps Script add the USERS script property (e.g. rony:YourPassword) and run setup.');
+    }
+    const user = users.find(function (u) { return u.username === username; });
     if (!user) {
       // Spend the same effort as a real check so timing does not reveal valid usernames.
       pbkdf2Hex_(password, '00000000000000000000000000000000', PASSWORD_ITERATIONS);

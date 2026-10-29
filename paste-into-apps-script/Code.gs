@@ -267,9 +267,15 @@ function getSpreadsheet_() {
   return SPREADSHEET_;
 }
 
+/** Returns a sheet, creating it (with headers) if it is missing, so a forgotten setup() is self-healing. */
 function getSheet_(name) {
-  const sheet = getSpreadsheet_().getSheetByName(name);
-  if (!sheet) throw apiError_('CONFIG', 'Sheet "' + name + '" is missing. Run setup() from the Apps Script editor.');
+  const ss = getSpreadsheet_();
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    if (!SCHEMA[name]) throw apiError_('CONFIG', 'Unknown sheet "' + name + '".');
+    ensureSheet_(ss, name, SCHEMA[name]);
+    sheet = ss.getSheetByName(name);
+  }
   return sheet;
 }
 
@@ -1064,7 +1070,11 @@ function handleLogin_(ctx, payload) {
   if (!username || !password || password.length > 200) throw apiError_('AUTH', BAD_LOGIN);
 
   return withLock_(function () {
-    const user = allRecords_('Users').find(function (u) { return u.username === username; });
+    const users = allRecords_('Users');
+    if (!users.length) {
+      throw apiError_('CONFIG', 'No accounts exist yet. In Apps Script add the USERS script property (e.g. rony:YourPassword) and run setup.');
+    }
+    const user = users.find(function (u) { return u.username === username; });
     if (!user) {
       // Spend the same effort as a real check so timing does not reveal valid usernames.
       pbkdf2Hex_(password, '00000000000000000000000000000000', PASSWORD_ITERATIONS);
@@ -2565,7 +2575,9 @@ function setup() {
     applyUsersProperty_();
   });
 
-  console.log('Setup complete. Spreadsheet: ' + ss.getUrl());
+  const names = allRecords_('Users').map(function (u) { return u.username + (u.role === 'admin' ? ' (admin)' : ''); });
+  console.log('Setup complete. Database spreadsheet: ' + ss.getUrl());
+  console.log(names.length ? 'Accounts that can sign in: ' + names.join(', ') : 'No accounts yet: add the USERS script property and run setup again.');
 }
 
 function ensureSheet_(ss, name, columns) {

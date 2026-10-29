@@ -187,3 +187,18 @@ describe('request handling', () => {
     expect(res.error.message).not.toContain('secret');
   });
 });
+
+describe('recovery from a missing setup', () => {
+  it('recreates missing sheets and explains that there are no accounts yet', () => {
+    const env = newEnv();
+    const ss = env.database();
+    ss.deleteSheet(ss.getSheetByName('Users'));
+    const res = env.call('login', { username: 'rony', password: PASSWORDS.rony });
+    expect(res).toMatchObject({ ok: false, error: { code: 'CONFIG' } });
+    expect(res.error.message).toContain('USERS');
+    expect(ss.getSheetByName('Users')).not.toBeNull();
+    env.properties.set('USERS', 'rony:' + PASSWORDS.rony);
+    env.get('setup')();
+    expect(signIn(env, 'rony').user.role).toBe('admin');
+  });
+});

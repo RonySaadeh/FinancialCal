@@ -23,9 +23,15 @@ function getSpreadsheet_() {
   return SPREADSHEET_;
 }
 
+/** Returns a sheet, creating it (with headers) if it is missing, so a forgotten setup() is self-healing. */
 function getSheet_(name) {
-  const sheet = getSpreadsheet_().getSheetByName(name);
-  if (!sheet) throw apiError_('CONFIG', 'Sheet "' + name + '" is missing. Run setup() from the Apps Script editor.');
+  const ss = getSpreadsheet_();
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    if (!SCHEMA[name]) throw apiError_('CONFIG', 'Unknown sheet "' + name + '".');
+    ensureSheet_(ss, name, SCHEMA[name]);
+    sheet = ss.getSheetByName(name);
+  }
   return sheet;
 }
 
