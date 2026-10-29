@@ -1,0 +1,138 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Semantic tokens. Components use these names, so light/dark switch in one place. */
+:root {
+  color-scheme: light;
+  --page: #f5f6fa;
+  --surface: #ffffff;
+  --surface-2: #f8f9fc;
+  --surface-3: #eef0f6;
+  --border: #e4e7ee;
+  --ink: #0f172a;
+  --ink-2: #475569;
+  --ink-3: #64748b;
+  --brand: #4f46e5;
+  --brand-ink: #ffffff;
+  --brand-soft: #eef0ff;
+  --brand-strong: #4338ca;
+  --positive: #047857;
+  --positive-soft: #ecfdf5;
+  --negative: #b91c1c;
+  --negative-soft: #fef2f2;
+  --warning: #a16207;
+  --warning-soft: #fefce8;
+  --sidebar: #0f1530;
+  --sidebar-ink: #c7cbe0;
+  --sidebar-active: #1e2650;
+
+  /* Chart chrome and validated categorical series (dataviz reference palette). */
+  --chart-grid: #e1e0d9;
+  --chart-axis: #898781;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
+  --status-good: #0ca30c;
+  --status-critical: #d03b3b;
+}
+
+.dark {
+  color-scheme: dark;
+  --page: #0a0d17;
+  --surface: #121725;
+  --surface-2: #171d2e;
+  --surface-3: #1e2539;
+  --border: #252d43;
+  --ink: #eef0f6;
+  --ink-2: #c0c6d6;
+  --ink-3: #8e97ad;
+  --brand: #7c83ff;
+  --brand-ink: #0a0d17;
+  --brand-soft: #1e2350;
+  --brand-strong: #9aa0ff;
+  --positive: #34d399;
+  --positive-soft: #0f2a22;
+  --negative: #f87171;
+  --negative-soft: #2d1416;
+  --warning: #facc15;
+  --warning-soft: #2a2410;
+  --sidebar: #0b0f1d;
+  --sidebar-ink: #aab2c8;
+  --sidebar-active: #1a2140;
+
+  --chart-grid: #2c2c2a;
+  --chart-axis: #898781;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--border);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-brand: var(--brand);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-strong: var(--brand-strong);
+  --color-positive: var(--positive);
+  --color-positive-soft: var(--positive-soft);
+  --color-negative: var(--negative);
+  --color-negative-soft: var(--negative-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-ink: var(--sidebar-ink);
+  --color-sidebar-active: var(--sidebar-active);
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+html,
+body {
+  background: var(--page);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'cv11', 'ss01';
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Recharts: keep focus rings off SVG wrappers; tooltips use our card style. */
+.recharts-wrapper:focus,
+.recharts-surface:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

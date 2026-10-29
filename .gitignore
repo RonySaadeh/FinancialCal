@@ -1,0 +1,11 @@
+.dev-data/
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+.clasp.json
+apps-script/.clasp.json
+*.log
+.DS_Store
+coverage/
