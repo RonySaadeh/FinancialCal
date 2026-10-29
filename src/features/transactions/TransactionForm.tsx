@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from 'react';
-import { Button, Field, FormError, Modal, Segmented, Select, SelectField, Textarea, TextField } from '../../components/ui';
-import { useAction } from '../../lib/queries';
+import { Alert, Button, Field, Modal, Segmented, Select, SelectField, Textarea, TextField } from '../../components/ui';
 import { RECURRENCE_LABELS, ACCOUNT_TYPE_LABELS } from '../../lib/format';
 import type { Transaction, TransactionType } from '../../lib/types';
 import { useFinance } from '../FinanceContext';
+import { useSaveTransaction } from './useTransactionMutations';
 
 export interface TransactionDraft {
   type?: TransactionType;
@@ -27,9 +27,8 @@ export function TransactionForm({ open, onClose, transaction, draft }: {
 
 function TransactionFormBody({ onDone, transaction, draft }: { onDone: () => void; transaction: Transaction | null; draft?: TransactionDraft }) {
   const f = useFinance();
-  const add = useAction('addTransaction');
-  const update = useAction('updateTransaction');
-  const mutation = transaction ? update : add;
+  const save = useSaveTransaction();
+  const [formError, setFormError] = useState<string | null>(null);
 
   const firstAccount = f.openAccounts[0]?.id ?? '';
   const [type, setType] = useState<TransactionType>(transaction?.type ?? draft?.type ?? 'expense');
@@ -68,8 +67,28 @@ function TransactionFormBody({ onDone, transaction, draft }: { onDone: () => voi
       payload.categoryId = effectiveCategory;
       payload.toAccountId = '';
     }
+    if (!(Number(amount) > 0)) return setFormError('Enter an amount greater than zero.');
+    if (crossCurrency && !(Number(toAmount) > 0)) return setFormError('Enter the amount received in the destination account.');
+    if (type === 'transfer' && (!toAccountId || toAccountId === accountId)) return setFormError('Choose a different destination account.');
     if (transaction) payload.id = transaction.id;
-    mutation.mutate(payload, { onSuccess: onDone });
+
+    // Show it immediately; the server confirms (or rolls back) in the background.
+    const now = new Date().toISOString();
+    const optimistic: Transaction = {
+      ...(transaction ?? {
+        id: `tmp_${Date.now()}`, linkType: '', linkId: '', recurringId: '', createdAt: now
+      }),
+      type, amount: Number(amount), date, accountId, description, notes,
+      currency: from?.currency ?? f.base,
+      categoryId: type === 'transfer' ? '' : effectiveCategory,
+      toAccountId: type === 'transfer' ? toAccountId : '',
+      toAmount: crossCurrency ? Number(toAmount) : '',
+      recurrence: isOccurrence ? '' : (recurrence as Transaction['recurrence']),
+      updatedAt: now
+    } as Transaction;
+    const label = description || (type === 'transfer' ? 'Transfer' : f.categoryById.get(effectiveCategory)?.name ?? 'transaction');
+    save.mutate({ payload, optimistic, label });
+    onDone();
   };
 
   if (!f.openAccounts.length && !transaction) {
@@ -133,10 +152,10 @@ function TransactionFormBody({ onDone, transaction, draft }: { onDone: () => voi
           </Select>
         </Field>
       )}
-      <FormError error={mutation.error} />
+      {formError && <Alert tone="error">{formError}</Alert>}
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="secondary" onClick={onDone}>Cancel</Button>
-        <Button type="submit" loading={mutation.isPending}>{transaction ? 'Save changes' : 'Add transaction'}</Button>
+        <Button type="submit">{transaction ? 'Save changes' : 'Add transaction'}</Button>
       </div>
     </form>
   );

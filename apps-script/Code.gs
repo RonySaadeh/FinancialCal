@@ -143,7 +143,8 @@ function handleRequest_(request) {
     if (typeof payload !== 'object' || Array.isArray(payload)) throw apiError_('BAD_REQUEST', 'Payload must be an object.');
 
     let ctx = {};
-    if (route.auth !== false) {
+    // Write routes authenticate inside the lock below (once), read routes here.
+    if (route.auth !== false && !route.write) {
       ctx = requireSession_(request.token);
       if (route.admin && ctx.user.role !== 'admin') throw apiError_('FORBIDDEN', 'Administrator access is required.');
     }

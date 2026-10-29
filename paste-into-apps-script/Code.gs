@@ -259,6 +259,14 @@ function resetDbCache_() {
   SPREADSHEET_ = null;
 }
 
+/** Header row only (cheap), used when appending without needing the rows. */
+function readHeader_(name) {
+  if (DB_CACHE_[name]) return DB_CACHE_[name].header;
+  const sheet = getSheet_(name);
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  return sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+}
+
 function getSpreadsheet_() {
   if (SPREADSHEET_) return SPREADSHEET_;
   const id = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
@@ -369,7 +377,7 @@ function rowFromRecord_(name, header, record) {
 function insertRecords_(name, records) {
   if (!records.length) return records;
   const sheet = getSheet_(name);
-  const header = readTable_(name).header;
+  const header = readHeader_(name);
   const rows = records.map(function (r) { return rowFromRecord_(name, header, r); });
   const start = sheet.getLastRow() + 1;
   sheet.getRange(start, 1, rows.length, header.length).setValues(rows);
@@ -439,7 +447,8 @@ function withLock_(fn) {
     throw apiError_('BUSY', 'The server is busy saving another change. Please try again.');
   }
   try {
-    resetDbCache_();
+    // Rows may have changed while we waited for the lock: drop cached tables (keep the open spreadsheet).
+    DB_CACHE_ = {};
     const result = fn();
     SpreadsheetApp.flush();
     return result;
@@ -2503,7 +2512,8 @@ function handleRequest_(request) {
     if (typeof payload !== 'object' || Array.isArray(payload)) throw apiError_('BAD_REQUEST', 'Payload must be an object.');
 
     let ctx = {};
-    if (route.auth !== false) {
+    // Write routes authenticate inside the lock below (once), read routes here.
+    if (route.auth !== false && !route.write) {
       ctx = requireSession_(request.token);
       if (route.admin && ctx.user.role !== 'admin') throw apiError_('FORBIDDEN', 'Administrator access is required.');
     }

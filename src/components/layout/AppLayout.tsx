@@ -1,8 +1,9 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useIsMutating } from '@tanstack/react-query';
 import { NavLink, Outlet, useLocation } from 'react-router';
 import {
   ArrowLeftRight, ChartPie, FileChartColumn, Landmark, LayoutDashboard, LogOut, Menu, Moon, PiggyBank, Plus,
-  Shield, Sun, Tags, Target, TrendingUp, UserRound, Wallet, X, Monitor
+  Shield, Sun, Tags, Target, TrendingUp, UserRound, Wallet, X, Monitor, Loader2, Check
 } from 'lucide-react';
 import { useAuth, useUser } from '../../features/auth/AuthProvider';
 import { useTheme } from '../../features/theme/ThemeProvider';
@@ -97,6 +98,27 @@ function SideNav({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+/** Shows "Saving…" while any change is being written to Google Sheets, then "Saved". */
+function SaveStatus() {
+  const pending = useIsMutating();
+  const [justSaved, setJustSaved] = useState(false);
+  const was = useRef(0);
+  useEffect(() => {
+    if (was.current > 0 && pending === 0) {
+      setJustSaved(true);
+      const t = setTimeout(() => setJustSaved(false), 2000);
+      was.current = pending;
+      return () => clearTimeout(t);
+    }
+    was.current = pending;
+  }, [pending]);
+  if (pending > 0) {
+    return <span className="flex items-center gap-1.5 text-xs text-ink-3" role="status"><Loader2 className="size-3.5 animate-spin" aria-hidden />Saving…</span>;
+  }
+  if (justSaved) return <span className="flex items-center gap-1.5 text-xs text-positive" role="status"><Check className="size-3.5" aria-hidden />Saved</span>;
+  return null;
+}
+
 export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [txOpen, setTxOpen] = useState(false);
@@ -133,7 +155,8 @@ export function AppLayout() {
             <Menu className="size-5" />
           </IconButton>
           <p className="flex-1 truncate text-sm font-medium text-ink-2 lg:hidden">{title}</p>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-3">
+            <SaveStatus />
             <Button size="sm" icon={<Plus className="size-4" />} onClick={() => quick.openTransaction()}>
               Add transaction
             </Button>

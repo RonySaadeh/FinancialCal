@@ -40,16 +40,16 @@ export const useAdminUsers = (enabled: boolean) => useQuery({ queryKey: qk.admin
 /**
  * Generic write hook: calls an allow-listed action and refreshes cached data.
  * Components pass the action name; the backend validates everything.
+ * The refresh is not awaited, so forms close as soon as the save is confirmed
+ * instead of also waiting for every page's data to reload.
  */
 export function useAction<TPayload extends Record<string, unknown> = Record<string, unknown>, TResult = unknown>(action: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (payload: TPayload) => api<TResult>(action, payload),
-    onSuccess: async () => {
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ['data'] }),
-        action.startsWith('admin') ? qc.invalidateQueries({ queryKey: ['admin'] }) : Promise.resolve()
-      ]);
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['data'] });
+      if (action.startsWith('admin')) void qc.invalidateQueries({ queryKey: ['admin'] });
     }
   });
 }

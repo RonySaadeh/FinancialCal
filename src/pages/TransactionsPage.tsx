@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { ArrowDown, ArrowLeftRight, ArrowUp, Download, Lock, Pencil, Plus, Repeat, Search, Trash } from 'lucide-react';
+import { ArrowDown, ArrowLeftRight, ArrowUp, Download, Loader2, Lock, Pencil, Plus, Repeat, Search, Trash } from 'lucide-react';
 import { useAction, useTransactions } from '../lib/queries';
 import { downloadCsv } from '../lib/csv';
 import { formatDate, formatMoney, RECURRENCE_LABELS } from '../lib/format';
@@ -9,6 +9,7 @@ import type { Transaction } from '../lib/types';
 import { useFinance } from '../features/FinanceContext';
 import { TransactionForm } from '../features/transactions/TransactionForm';
 import { useQuickAdd } from '../components/layout/AppLayout';
+import { isPendingTransaction, useDeleteTransaction } from '../features/transactions/useTransactionMutations';
 import {
   Alert, Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, FormError, IconButton, Input, PageHeader, Segmented, Select, Signed, Spinner
 } from '../components/ui';
@@ -39,7 +40,7 @@ function AllTransactions({ data }: { data: Transaction[] }) {
   const [limit, setLimit] = useState(50);
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState<Transaction | null>(null);
-  const del = useAction('deleteTransaction');
+  const del = useDeleteTransaction();
 
   const type = params.get('type') ?? '';
   const accountId = params.get('account') ?? '';
@@ -197,14 +198,16 @@ function AllTransactions({ data }: { data: Transaction[] }) {
                         {t.toAmount ? <p className="text-xs font-normal text-ink-3">→ {formatMoney(Number(t.toAmount), toAcc?.currency ?? '')}</p> : null}
                       </td>
                       <td className="whitespace-nowrap px-2 py-3 text-right">
-                        {t.linkType ? (
+                        {isPendingTransaction(t) ? (
+                          <span className="inline-flex items-center gap-1.5 px-2 text-xs text-ink-3" role="status"><Loader2 className="size-3.5 animate-spin" aria-hidden />Saving</span>
+                        ) : t.linkType ? (
                           <a href={t.linkType === 'investment' ? '#/investments' : '#/debts'} className="inline-flex size-8 items-center justify-center text-ink-3" title="Managed from its page" aria-label="Managed from its page">
                             <Lock className="size-4" />
                           </a>
                         ) : (
                           <>
                             <IconButton label="Edit transaction" onClick={() => setEditing(t)}><Pencil className="size-4" /></IconButton>
-                            <IconButton label="Delete transaction" onClick={() => { del.reset(); setDeleting(t); }}><Trash className="size-4" /></IconButton>
+                            <IconButton label="Delete transaction" onClick={() => setDeleting(t)}><Trash className="size-4" /></IconButton>
                           </>
                         )}
                       </td>
@@ -227,10 +230,11 @@ function AllTransactions({ data }: { data: Transaction[] }) {
         open={!!deleting}
         title="Delete transaction?"
         message={deleting && <>This permanently removes <strong>{deleting.description || 'this transaction'}</strong> ({formatMoney(deleting.amount, deleting.currency)} on {formatDate(deleting.date)}). Account balances update automatically.</>}
-        loading={del.isPending}
-        error={del.error}
         onClose={() => setDeleting(null)}
-        onConfirm={() => deleting && del.mutate({ id: deleting.id }, { onSuccess: () => setDeleting(null) })}
+        onConfirm={() => {
+          if (deleting) del.mutate(deleting);
+          setDeleting(null);
+        }}
       />
     </>
   );
